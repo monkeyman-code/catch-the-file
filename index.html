@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>File-Sorter</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+body{margin:0;font-family:system-ui;background:#222;color:#fff;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+#top{height:44px;display:flex;align-items:center;justify-content:space-around;background:#111;}
+#game{flex:1;position:relative;cursor:grab}
+.basket{position:absolute;bottom:10px;width:120px;height:60px;border:3px dashed #fff;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:bold}
+.file{position:absolute;width:80px;height:30px;background:#444;border:1px solid #888;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:grab;user-select:none}
+.miss{animation:shake .3s}@keyframes shake{25%{transform:translateX(3px)}75%{transform:translateX(-3px)}}
+#over{position:absolute;inset:0;background:#0009;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+#over button{padding:10px 20px;font-size:1.2em;margin-top:10px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="top">
+  <div>Score <b id="score">0</b></div>
+  <div>Lives <b id="lives">3</b></div>
+  <div>Speed <b id="speed">1</b></div>
+</div>
+<canvas id="game"></canvas>
+<div id="over">
+  <h2>Game Over</h2>
+  <p>Final score: <span id="final">0</span></p>
+  <button onclick="location.reload()">Play Again</button>
+</div>
+
+<script>
+/* ---------- CONFIG ---------- */
+const BASKET_W   = 120;
+const FILE_W     = 80;
+const FILE_H     = 30;
+const DROP_SPEED = 1;        // px/frame, scales with score
+const SPAWN_EVERY= 90;       // frames
+const EXTENSIONS = {         // colour + folder
+  '.txt':{color:'#7ef',folder:'Documents'},
+  '.pdf':{color:'#f77',folder:'Documents'},
+  '.jpg':{color:'#7f7',folder:'Images'},
+  '.png':{color:'#7f7',folder:'Images'},
+  '.mp4':{color:'#fa7',folder:'Videos'},
+  '.mov':{color:'#fa7',folder:'Videos'}
+};
+const FOLDERS    = ['Documents','Images','Videos'];
+
+/* ---------- STATE ---------- */
+const cvs=document.getElementById('game'),ctx=cvs.getContext('2d');
+let score=0,lives=3,speed=1,frame=0,files=[],baskets=[];
+resize(); window.addEventListener('resize',resize);
+function resize(){
+  cvs.width=document.documentElement.clientWidth;
+  cvs.height=document.documentElement.clientHeight - 44;
+  placeBaskets();
+}
+function placeBaskets(){
+  baskets=FOLDERS.map((name,i)=>{
+    const x=(cvs.width - FOLDERS.length*BASKET_W)/(FOLDERS.length+1)*(i+1) + i*BASKET_W;
+    return{name,x:x,y:cvs.height-70,w:BASKET_W,h:60};
+  });
+}
+
+/* ---------- FILE OBJ ---------- */
+class File{
+  constructor(){
+    const ext=Object.keys(EXTENSIONS)[Math.floor(Math.random()*Object.keys(EXTENSIONS).length)];
+    this.ext=ext;
+    this.folder=EXTENSIONS[ext].folder;
+    this.color=EXTENSIONS[ext].color;
+    this.w=FILE_W;this.h=FILE_H;
+    this.x=Math.random()*(cvs.width-this.w);
+    this.y=-this.h;
+    this.grabbed=false;
+    this.missed=false;
+  }
+  update(){
+    if(!this.grabbed)this.y+=DROP_SPEED*speed;
+    if(this.y+this.h>cvs.height&&!this.missed){this.missed=true;lives--;cvs.classList.add('miss');setTimeout(()=>cvs.classList.remove('miss'),300);}
+  }
+  draw(){
+    ctx.fillStyle=this.color;ctx.fillRect(this.x,this.y,this.w,this.h);
+    ctx.fillStyle='#000';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText(this.ext,this.x+this.w/2,this.y+18);
+  }
+}
+
+/* ---------- INPUT ---------- */
+let grabbed=null,offsetX=0,offsetY=0;
+cvs.addEventListener('mousedown',e=>{startGrab(e.clientX,e.clientY);});
+cvs.addEventListener('touchstart',e=>{e.preventDefault();const t=e.changedTouches[0];startGrab(t.clientX,t.clientY);});
+function startGrab(clientX,clientY){
+  const rect=cvs.getBoundingClientRect();
+  const x=clientX-rect.left,y=clientY-rect.top;
+  for(let f of files){
+    if(x>f.x&&x<f.x+f.w&&y>f.y&&y<f.y+f.h&&!f.missed){
+      grabbed=f;offsetX=x-f.x;offsetY=y-f.y;f.grabbed=true;break;
+    }
+  }
+}
+window.addEventListener('mousemove',e=>{moveGrab(e.clientX,e.clientY);});
+window.addEventListener('touchmove',e=>{if(grabbed){e.preventDefault();const t=e.changedTouches[0];moveGrab(t.clientX,t.clientY);}});
+function moveGrab(clientX,clientY){
+  if(!grabbed)return;
+  const rect=cvs.getBoundingClientRect();
+  grabbed.x=clientX-rect.left-offsetX;
+  grabbed.y=clientY-rect.top-offsetY;
+}
+window.addEventListener('mouseup',()=>{drop();});
+window.addEventListener('touchend',()=>{drop();});
+function drop(){
+  if(!grabbed)return;
+  // check if over correct basket
+  for(let b of baskets){
+    if(grabbed.x+grabbed.w/2>b.x&&grabbed.x+grabbed.w/2<b.x+b.w&&grabbed.y+grabbed.h>b.y){
+      if(b.name===grabbed.folder){score++;speed=Math.min(3,1+score*0.02);}
+      else{lives--;}
+      files=files.filter(f=>f!==grabbed);
+      break;
+    }
+  }
+  grabbed.grabbed=false;grabbed=null;
+  updateHUD();
+}
+
+/* ---------- GAME LOOP ---------- */
+function loop(){
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+  // draw baskets
+  baskets.forEach(b=>{
+    ctx.strokeStyle='#fff';ctx.strokeRect(b.x,b.y,b.w,b.h);
+    ctx.fillStyle='#fff';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText(b.name,b.x+b.w/2,b.y+b.h/2+5);
+  });
+  // spawn
+  if(frame%SPAWN_EVERY===0)files.push(new File());
+  // update & draw files
+  files=files.filter(f=>!f.missed||f.y<cvs.height+50);
+  files.forEach(f=>{f.update();f.draw();});
+  // game over
+  if(lives<=0){document.getElementById('final').textContent=score;document.getElementById('over').style.display='flex';return;}
+  frame++;
+  requestAnimationFrame(loop);
+}
+function updateHUD(){
+  document.getElementById('score').textContent=score;
+  document.getElementById('lives').textContent=lives;
+  document.getElementById('speed').textContent=speed.toFixed(1);
+}
+loop();
+</script>
+</body>
+</html>
